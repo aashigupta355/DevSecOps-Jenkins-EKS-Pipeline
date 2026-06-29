@@ -87,7 +87,6 @@ aws eks --region eu-central-1 update-kubeconfig --name
 Trigger Jenkins pipeline — it runs all stages automatically
 
 ## 📸 Screenshots
-[Add screenshots of:]
 - <img width="1280" height="331" alt="image" src="https://github.com/user-attachments/assets/ed38dfc0-6dbf-4ace-98a6-49556a68c6d3" />
 - <img width="1280" height="603" alt="image" src="https://github.com/user-attachments/assets/4984bae6-d451-4df9-b169-c2e6ceec48b0" />
 - <img width="1280" height="578" alt="image" src="https://github.com/user-attachments/assets/7b538e34-f00b-4054-a519-fda84689d57f" />
