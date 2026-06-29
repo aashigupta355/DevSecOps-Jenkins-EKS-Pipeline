@@ -4,7 +4,8 @@ Built a multi-stage Jenkins pipeline integrating Sonar- Qube (static code analys
 # End-to-End DevSecOps CI/CD Pipeline with EKS Deployment
 
 ## 🏗️ Architecture Overview
-<img width="940" height="660" alt="image" src="https://github.com/user-attachments/assets/f943e7ce-0e2a-48cc-9fc5-4a4054776ab4" />
+<img width="458" height="220" alt="image" src="https://github.com/user-attachments/assets/bcb4fae6-7d67-4be7-bab9-8181ec3c4de6" />
+
 
 ## 📋 What This Project Does
 Automated CI/CD pipeline that takes application code from GitHub 
