@@ -1,0 +1,178 @@
+pipeline {
+    agent { label 'slave-2' }
+
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+
+    environment {
+        // ── SonarQube ───────────────────────────────────────────────
+        SCANNER_HOME      = tool 'sonarqube-scan'
+        SONAR_PROJECT_KEY = 'Blogging-App'
+
+        // ── Docker ──────────────────────────────────────────────────
+        DOCKER_IMAGE      = 'aashigupta355/bloggingapp'
+        DOCKER_TAG        = 'latest'
+
+        // ── Kubernetes ──────────────────────────────────────────────
+        K8S_NAMESPACE     = 'webapps'
+        K8S_MANIFEST      = 'deployment-service.yml'
+    }
+
+    stages {
+
+        // ── Stage 1: Source Code ────────────────────────────────────
+        stage('Git Checkout') {
+            steps {
+                deleteDir()
+                git(
+                    branch:        'main',
+                    changelog:     false,
+                    poll:          false,
+                    credentialsId: env.GIT_CREDENTIALS_ID,   // Set in Jenkins → Credentials
+                    url:           'https://github.com/aashigupta355/FullStack-Blogging-App.git'
+                )
+            }
+        }
+
+        // ── Stage 2: Build Validation ────────────────────────────────
+        stage('Compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+
+        // ── Stage 3: Unit Tests ──────────────────────────────────────
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        // ── Stage 4: Security — Source Code Scan ─────────────────────
+        stage('Trivy FS Scan') {
+            steps {
+                sh 'trivy fs --format table -o trivy-fs-report.html .'
+            }
+        }
+
+        // ── Stage 5: Code Quality ────────────────────────────────────
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh """
+                        mvn sonar:sonar \
+                            -DskipTests \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.projectName=${SONAR_PROJECT_KEY}
+                    """
+                }
+            }
+        }
+
+        // ── Stage 6: Package Application ─────────────────────────────
+        stage('Build') {
+            steps {
+                sh 'mvn package -DskipTests'
+            }
+        }
+
+        // ── Stage 7: Docker Image Build ───────────────────────────────
+        stage('Docker Build and Tag') {
+            steps {
+                script {
+                    withDockerRegistry(
+                        credentialsId: env.DOCKER_CREDENTIALS_ID,   // Set in Jenkins → Credentials
+                        toolName:      'docker'
+                    ) {
+                        sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                    }
+                }
+            }
+        }
+
+        // ── Stage 8: Security — Docker Image Scan ────────────────────
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image --format table -o trivy-image-report.html ${DOCKER_IMAGE}:${DOCKER_TAG}"
+            }
+        }
+
+        // ── Stage 9: Push Image to Registry ──────────────────────────
+        stage('Docker Push') {
+            steps {
+                script {
+                    withDockerRegistry(
+                        credentialsId: env.DOCKER_CREDENTIALS_ID,   // Set in Jenkins → Credentials
+                        toolName:      'docker'
+                    ) {
+                        sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    }
+                }
+            }
+        }
+
+        // ── Stage 10: Deploy to EKS ───────────────────────────────────
+        stage('Deploy to Kubernetes') {
+            steps {
+                kubeconfig(
+                    credentialsId: env.K8S_CREDENTIALS_ID,   // Set in Jenkins → Credentials
+                    serverUrl:     env.K8S_SERVER_URL,        // Set as Jenkins env var or credential
+                    caCertificate: env.K8S_CA_CERTIFICATE     // Set as Jenkins secret text credential
+                ) {
+                    sh "kubectl -n ${K8S_NAMESPACE} apply -f ${K8S_MANIFEST}"
+                    sleep 20
+                }
+            }
+        }
+
+        // ── Stage 11: Verify Deployment ───────────────────────────────
+        stage('Verify Deployment') {
+            steps {
+                kubeconfig(
+                    credentialsId: env.K8S_CREDENTIALS_ID,
+                    serverUrl:     env.K8S_SERVER_URL,
+                    caCertificate: env.K8S_CA_CERTIFICATE
+                ) {
+                    sh "kubectl -n ${K8S_NAMESPACE} get pods"
+                    sh "kubectl -n ${K8S_NAMESPACE} get svc"
+                }
+            }
+        }
+    }
+
+    // ── Post Build Notifications ──────────────────────────────────────
+    post {
+        success {
+            emailext(
+                subject: "✅ SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body:    """
+                    <h3>Build Succeeded</h3>
+                    <p><b>Job:</b> ${env.JOB_NAME}</p>
+                    <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+                    <p><b>Details:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to:      env.NOTIFY_EMAIL,   // Set in Jenkins → Credentials or env vars
+                mimeType: 'text/html'
+            )
+        }
+        failure {
+            emailext(
+                subject: "❌ FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body:    """
+                    <h3>Build Failed</h3>
+                    <p><b>Job:</b> ${env.JOB_NAME}</p>
+                    <p><b>Build:</b> #${env.BUILD_NUMBER}</p>
+                    <p><b>Details:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                """,
+                to:      env.NOTIFY_EMAIL,
+                mimeType: 'text/html'
+            )
+        }
+        always {
+            // Archive Trivy scan reports as build artifacts
+            archiveArtifacts artifacts: 'trivy-*.html', allowEmptyArchive: true
+        }
+    }
+}
